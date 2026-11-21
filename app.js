@@ -560,5 +560,8 @@ function teamView(id) {
 if (new URLSearchParams(location.search).has('reset')) { try { localStorage.clear(); } catch (e) { console.warn(e); } }
 route();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('deberz: service worker не запустился', e));
+  // вышла новая версия — один раз перезагружаем страницу, чтобы сразу показать её
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !window.__reloaded) { window.__reloaded = true; location.reload(); } });
 }

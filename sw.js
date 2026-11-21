@@ -1,5 +1,5 @@
 // Офлайн: кладём весь сайт в кеш при установке, дальше отдаём из кеша.
-const VERSION = 'deberz-v3';
+const VERSION = 'deberz-v4';
 const FILES = [
   './', './index.html', './style.css', './app.js', './scoring.js', './store.js',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
@@ -16,16 +16,15 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// Сначала сеть (всегда свежая версия), при отсутствии интернета — из кеша.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) => {
-      if (hit) {
-        // тихо обновляем кеш в фоне, если есть сеть
-        fetch(e.request).then((r) => { if (r.ok) caches.open(VERSION).then((c) => c.put(e.request, r)); }).catch(() => {});
-        return hit;
-      }
-      return fetch(e.request).catch(() => caches.match('./index.html'));
-    }),
+    Promise.race([fetch(e.request, { cache: 'no-cache' }), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]) // слабый интернет: через 3 с берём копию из кеша
+      .then((r) => {
+        if (r.ok && new URL(e.request.url).origin === location.origin) { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
+        return r;
+      })
+      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || caches.match('./index.html'))),
   );
 });
