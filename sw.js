@@ -1,5 +1,5 @@
 // Офлайн: кладём весь сайт в кеш при установке, дальше отдаём из кеша.
-const VERSION = 'deberz-v5';
+const VERSION = 'deberz-v6';
 const FILES = [
   './', './index.html', './style.css', './app.js', './scoring.js', './store.js',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',

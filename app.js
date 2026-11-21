@@ -387,7 +387,9 @@ function roundSheetSimple(g, editIndex = null, seed = null) {
     loader: src ? src.loader : null, total: src?.total ?? lastTotal,
     cards: src ? src.cards.map(String) : Array(n).fill(''), manual: src ? [...Array(n - 1).keys()] : [],
     active: 0, fresh: true, totalStr: '',
+    nt: src ? src.noTricks.map((v) => (seed && !v ? null : v)) : Array(n).fill(null), // null = авто: 0 очков → без взяток
   };
+  const noTr = (i) => (st.nt[i] != null ? st.nt[i] : st.cards[i] === '0');
   const refill = () => {
     const autos = [...Array(n).keys()].filter((i) => !st.manual.includes(i));
     if (autos.length !== 1) return;
@@ -395,7 +397,7 @@ function roundSheetSimple(g, editIndex = null, seed = null) {
     st.cards[autos[0]] = vals.some((v) => v === '') ? '' : String(Math.max(0, st.total - vals.reduce((a, v) => a + Number(v), 0)));
   };
   const touch = (i) => { st.manual = st.manual.filter((x) => x !== i); st.manual.push(i); while (st.manual.length > n - 1) st.manual.shift(); };
-  const toRound = () => ({ ...newRound(n, st.loader), cards: st.cards.map((c) => Number(c) || 0), total: st.total });
+  const toRound = () => ({ ...newRound(n, st.loader), cards: st.cards.map((c) => Number(c) || 0), total: st.total, noTricks: g.sides.map((_, i) => noTr(i)) });
   return sheet((s) => {
     const preview = () => {
       if (st.loader == null) return h('div', { class: 'preview' }, h('div', { class: 'msg muted' }, 'Отметьте, кто заказал игру'));
@@ -432,7 +434,8 @@ function roundSheetSimple(g, editIndex = null, seed = null) {
           h('button', { class: 'chip' + (custom ? ' on' : ''), onclick: () => { st.active = -1; st.fresh = true; st.totalStr = ''; s.render(); } }, custom ? `Своя: ${st.total}` : 'Своя')),
         h('div', { class: 'rgrid n' + n, style: 'margin-top:8px' }, g.sides.map((x, i) => h('div', { class: 'col c' + i },
           h('button', { class: 'pts' + (st.active === i ? ' active' : '') + (st.cards[i] === '' ? ' empty' : ''), onclick: () => pick(i) },
-            h('span', { class: 'who-n' }, x.name), st.cards[i] === '' ? '0' : st.cards[i], !st.manual.includes(i) && st.cards[i] !== '' && h('small', null, 'авто')))))),
+            h('span', { class: 'who-n' }, x.name), st.cards[i] === '' ? '0' : st.cards[i], !st.manual.includes(i) && st.cards[i] !== '' && h('small', null, 'авто')),
+          h('button', { class: 'tg neg' + (noTr(i) ? ' on' : ''), style: 'margin-top:5px;width:100%', onclick: () => { st.nt[i] = !noTr(i); s.render(); } }, 'Без взяток', h('b', null, '−50')))))),
       h('div', { class: 'sfoot' },
         preview(),
         h('div', { class: 'keys' }, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0'].map((k) => h('button', { onclick: () => key(k), 'aria-label': k }, k)),
