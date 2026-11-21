@@ -208,12 +208,21 @@ function gameView(id) {
     h('button', { class: 'iconbtn', 'aria-label': 'Назад', onclick: () => (location.hash = '#/') }, '‹'),
     h('div', { class: 'grow' }, h('b', null, `До ${g.target}`), h('span', { class: 'muted small' }, ` · ${modeLabel[g.mode]}`)),
     h('button', { class: 'iconbtn', 'aria-label': 'Меню', onclick: () => gameMenu(g, r) }, '⋯')));
+  const maxT = Math.max(...r.totals);
+  const leaders = r.totals.filter((t) => t === maxT).length;
   wrap.append(h('div', { class: 'scores n' + n }, g.sides.map((s, i) => h('button', {
-    class: `sc c${i}` + (r.finished && r.winner === i ? ' win' : ''), onclick: () => editSide(g, i), 'aria-label': 'Изменить ' + s.name,
+    class: `sc c${i}` + (r.finished && r.winner === i ? ' win' : '') + (!r.finished && g.rounds.length && r.totals[i] === maxT && leaders === 1 ? ' lead' : ''), onclick: () => editSide(g, i), 'aria-label': 'Изменить ' + s.name,
   }, h('div', { class: 'nm' }, (r.finished && r.winner === i ? '🏆 ' : '') + s.name),
-    h('div', { class: 'mem' }, (s.members || []).filter(Boolean).join(' · ')),
+    (s.members || []).filter(Boolean).length ? h('div', { class: 'mem' }, s.members.filter(Boolean).join(' · ')) : null,
     h('div', { class: 'big' }, fmt(r.totals[i])),
-    h('div', { class: 'bar' }, h('i', { style: `width:${Math.max(0, Math.min(100, (r.totals[i] / g.target) * 100))}%` }))))));
+    h('div', { class: 'bar' }, h('i', { style: `width:${Math.max(0, Math.min(100, (r.totals[i] / g.target) * 100))}%` })),
+    h('div', { class: 'left' }, r.finished ? '' : `ещё ${fmt(Math.max(0, g.target - r.totals[i]))}`)))));
+  if (g.rounds.length && !r.finished) {
+    const sorted = [...r.totals.keys()].sort((x, y) => r.totals[y] - r.totals[x]);
+    const gap = r.totals[sorted[0]] - r.totals[sorted[1]];
+    wrap.append(h('div', { class: 'lead-line' }, gap === 0 ? 'Ничья — всё решит следующая сдача' : [h('b', { class: 'c' + sorted[0] }, g.sides[sorted[0]].name), ` ведёт на ${gap}`]));
+  }
+  if (g.rounds.length >= 2) wrap.append(trend(g, r));
   const metas = [];
   if (r.hanging > 0 && !r.finished) metas.push(h('span', { class: 'pill warn' }, `висячий байт ${r.hanging}`));
   g.sides.forEach((s, i) => { if (r.baits[i] > 0) metas.push(h('span', { class: 'pill' + (r.baits[i] >= 2 ? ' warn' : '') }, `${s.name}: байтов ${r.baits[i]}`)); });
@@ -222,7 +231,7 @@ function gameView(id) {
   const list = h('div', { class: 'rounds' });
   if (!g.rounds.length) list.append(h('div', { class: 'empty' }, h('b', null, 'Пока ни одной сдачи'), 'После каждой сдачи нажмите «＋ Сдача» и введите очки.'));
   else {
-    r.rows.forEach((row, k) => list.append(roundRow(g, row, k, n)));
+    for (let k = r.rows.length - 1; k >= 0; k--) list.append(roundRow(g, r.rows[k], k, n, k === r.rows.length - 1));
   }
   wrap.append(list);
   if (r.finished) {
@@ -238,22 +247,39 @@ function gameView(id) {
   return wrap;
 }
 
-function roundRow(g, row, k, n) {
+function roundRow(g, row, k, n, latest) {
   const rnd = g.rounds[k];
-  if (row.kind === 'debertz') return h('div', { class: 'rrow n' + n }, h('div', { class: 'no' }, k + 1), h('div', { class: 'cell', style: `grid-column: 2 / -1` }, h('b', null, `Деберц! ${g.sides[rnd.side].name} побеждает`)));
+  const cls = 'rrow n' + n + (latest ? ' latest' : '');
+  if (row.kind === 'debertz') return h('button', { class: cls, onclick: () => roundSheet(g, k) }, h('div', { class: 'no' }, k + 1), h('div', { class: 'cell', style: 'grid-column: 2 / -1' }, h('b', null, `Деберц! ${g.sides[rnd.side].name} побеждает`)));
   const cells = g.sides.map((s, i) => {
     const isL = row.loader === i;
-    const tags = [];
-    if (isL) tags.push(h('span', { class: 'tag ' + (row.kind === 'ok' ? 'load' : row.kind), }, row.kind === 'bait' ? 'БАЙТ' : row.kind === 'hang' ? 'ВИСИТ' : 'заказ'));
-    const combo = comboText(rnd.combos[i]) + (rnd.last === i ? ' послед' : '');
-    return h('div', { class: 'cell' },
-      h('div', { class: 'd' + (row.delta[i] === 0 ? ' zero' : '') }, sign(row.delta[i])),
-      h('div', null, tags), h('div', { class: 't' }, '= ' + fmt(row.totals[i])), combo.trim() && h('div', { class: 't' }, combo.trim()));
+    const tag = isL ? h('span', { class: 'tag ' + (row.kind === 'ok' ? 'load' : row.kind) }, row.kind === 'bait' ? 'БАЙТ' : row.kind === 'hang' ? 'ВИСИТ' : 'заказ') : null;
+    return h('div', { class: 'cell c' + i },
+      h('span', { class: 'd' + (row.delta[i] === 0 ? ' zero' : '') }, sign(row.delta[i])), tag, h('span', { class: 't' }, fmt(row.totals[i])));
   });
-  const el = h('button', { class: 'rrow n' + n, onclick: () => roundSheet(g, k) }, h('div', { class: 'no' }, k + 1), cells);
-  const notes = [...(rnd.total ? [`игра ${rnd.total}`] : []), ...row.notes];
+  const el = h('button', { class: cls, onclick: () => roundSheet(g, k) },
+    h('div', { class: 'no' }, h('b', null, k + 1), rnd.total ? h('small', null, rnd.total) : null), cells);
+  const combos = g.sides.map((s, i) => { const t = (comboText(rnd.combos[i]) + (rnd.last === i ? ' послед' : '')).trim(); return t && (n > 2 || isTeams(g) ? `${s.name}: ${t}` : `${s.name}: ${t}`); }).filter(Boolean);
+  const notes = [...combos, ...row.notes];
   if (notes.length) el.append(h('div', { class: 'note' }, notes.join(' · ')));
   return el;
+}
+// график хода партии: накопленные очки по сдачам
+function trend(g, r) {
+  const W = 320, H = 64, P = 6, n = g.sides.length;
+  const series = g.sides.map((_, i) => [0, ...r.rows.map((row) => row.totals[i])]);
+  const maxY = Math.max(g.target * 0.12, ...series.flat());
+  const X = (j) => P + (j / (series[0].length - 1)) * (W - 2 * P);
+  const Y = (v) => H - P - (v / maxY) * (H - 2 * P);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('class', 'trend'); svg.setAttribute('aria-hidden', 'true');
+  const add = (tag, at) => { const el = document.createElementNS(ns, tag); for (const k in at) el.setAttribute(k, at[k]); svg.append(el); return el; };
+  if (maxY >= g.target) add('line', { x1: P, x2: W - P, y1: Y(g.target), y2: Y(g.target), class: 'goal' });
+  series.forEach((s, i) => {
+    add('polyline', { points: s.map((v, j) => `${X(j).toFixed(1)},${Y(v).toFixed(1)}`).join(' '), class: 'ln c' + i });
+    add('circle', { cx: X(s.length - 1).toFixed(1), cy: Y(s.at(-1)).toFixed(1), r: 3.5, class: 'dot c' + i });
+  });
+  return h('div', { class: 'trendbox' }, svg);
 }
 const comboText = (c) => [c.terc ? 'терц' + (c.terc > 1 ? '×' + c.terc : '') : '', c.berc ? 'берц' + (c.berc > 1 ? '×' + c.berc : '') : '', c.bela ? 'бела' : ''].filter(Boolean).join(' ');
 
