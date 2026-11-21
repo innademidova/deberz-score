@@ -81,11 +81,11 @@ function startGame(setup) {
     return rememberSide(side, typed);
   });
   const g = {
-    id: store.uid(), created: Date.now(), mode: setup.mode, target: setup.target, sides, rounds: [],
+    id: store.uid(), created: Date.now(), mode: setup.mode, target: setup.target, simple: !!setup.simple, sides, rounds: [],
     settings: { ...DEFAULT_SETTINGS, ...(S.settings || {}) },
   };
   S.games.push(g); S.currentId = g.id;
-  S.last = { mode: setup.mode, target: setup.target, sides: sides.map((s) => ({ name: s.name, members: s.members, teamId: s.teamId })) };
+  S.last = { mode: setup.mode, target: setup.target, simple: !!setup.simple, sides: sides.map((s) => ({ name: s.name, members: s.members, teamId: s.teamId })) };
   store.save();
   location.hash = '#/game/' + g.id;
 }
@@ -141,6 +141,7 @@ function rulesSheet() {
         h('li', null, h('b', null, 'Заказавший'), ' должен набрать больше каждого соперника (карты + комбинации).'),
         h('li', null, h('b', null, 'Байт'), ' — набрал меньше: заказавший пишет 0, вистующий записывает все очки сдачи. На троих очки заказавшего получает тот, у кого больше (в настройках можно «поровну»).'),
         h('li', null, h('b', null, 'Равенство'), ' — «висячий байт»: заказавший пишет 0, его очки достаются тому, кто выиграет следующую сдачу.'),
+        h('li', null, h('b', null, 'Простая запись'), ': выбираете «игру» (162, 182, 202, 212… — сумма очков сдачи вместе с комбинациями) и вводите очки; остальные стороны считаются сами.'),
         h('li', null, 'Штрафы: каждый байт начиная с третьего −100; сдача без взяток −50 (можно отключить).'),
         h('li', null, 'Партия до 1001 (или 301/501). Побеждает набравший больше; при равенстве — вистовавший в последней сдаче. «Деберц» — мгновенная победа.'),
         h('li', null, 'Вчетвером (2×2) играются все 32 карты, поэтому очки второй команды считаются сами: 162 минус очки первой.'))),
@@ -154,7 +155,7 @@ let setup = null;
 function newGame() {
   if (!setup) {
     const l = S.last;
-    setup = l ? { mode: l.mode, target: l.target, sides: l.sides.map((s) => ({ ...s })) } : { mode: 'p2', target: 1001, sides: [{ name: '', members: [] }, { name: '', members: [] }] };
+    setup = l ? { mode: l.mode, target: l.target, simple: !!l.simple, sides: l.sides.map((s) => ({ ...s })) } : { mode: 'p2', target: 1001, simple: false, sides: [{ name: '', members: [] }, { name: '', members: [] }] };
   }
   const draw = () => app.replaceChildren(newGame());
   const setMode = (m) => {
@@ -189,6 +190,9 @@ function newGame() {
     setup.sides.map(sideCard),
     h('div', null, h('label', { class: 'lbl' }, 'Играем до'),
       h('div', { class: 'seg' }, [301, 501, 1001].map((t) => h('button', { class: setup.target === t ? 'on' : '', onclick: () => { setup.target = t; draw(); } }, t)))),
+    h('div', null, h('label', { class: 'lbl' }, 'Как записывать сдачи'),
+      h('div', { class: 'seg' }, [[false, 'Полная'], [true, 'Простая']].map(([v, t]) => h('button', { class: !!setup.simple === v ? 'on' : '', onclick: () => { setup.simple = v; draw(); } }, t))),
+      h('div', { class: 'muted small', style: 'margin:6px 2px 0' }, setup.simple ? 'Без терцев, бел и последа: выбираете игру (162, 182, 202…) и вводите очки.' : 'Отдельно очки за карты, послед, терцы, берцы и белу.')),
     h('button', { class: 'btn', onclick: () => { const s = setup; setup = null; startGame(s); } }, 'Начать игру'));
 }
 function history_back() { setup = null; location.hash = '#/'; }
@@ -225,7 +229,7 @@ function gameView(id) {
     wrap.append(h('div', { class: 'stack', style: 'margin-top:12px' },
       h('div', { class: 'card', style: 'text-align:center' }, h('div', { class: 'big-ico' }, '🏆'), h('b', null, `Победа: ${g.sides[r.winner].name}`),
         h('div', { class: 'muted' }, g.sides.map((s, i) => `${s.name} ${fmt(r.totals[i])}`).join(' : '))),
-      h('button', { class: 'btn', onclick: () => startGame({ mode: g.mode, target: g.target, sides: g.sides.map((s) => ({ ...s })) }) }, 'Ещё партию тем же составом'),
+      h('button', { class: 'btn', onclick: () => startGame({ mode: g.mode, target: g.target, simple: g.simple, sides: g.sides.map((s) => ({ ...s })) }) }, 'Ещё партию тем же составом'),
       h('button', { class: 'btn secondary', onclick: () => undoLast(g) }, 'Отменить последнюю сдачу')));
   } else {
     wrap.append(h('div', { class: 'fab' }, h('button', { class: 'btn', onclick: () => roundSheet(g) }, '＋ Сдача')));
@@ -247,7 +251,8 @@ function roundRow(g, row, k, n) {
       h('div', null, tags), h('div', { class: 't' }, '= ' + fmt(row.totals[i])), combo.trim() && h('div', { class: 't' }, combo.trim()));
   });
   const el = h('button', { class: 'rrow n' + n, onclick: () => roundSheet(g, k) }, h('div', { class: 'no' }, k + 1), cells);
-  if (row.notes.length) el.append(h('div', { class: 'note' }, row.notes.join(' · ')));
+  const notes = [...(rnd.total ? [`игра ${rnd.total}`] : []), ...row.notes];
+  if (notes.length) el.append(h('div', { class: 'note' }, notes.join(' · ')));
   return el;
 }
 const comboText = (c) => [c.terc ? 'терц' + (c.terc > 1 ? '×' + c.terc : '') : '', c.berc ? 'берц' + (c.berc > 1 ? '×' + c.berc : '') : '', c.bela ? 'бела' : ''].filter(Boolean).join(' ');
@@ -260,6 +265,7 @@ async function undoLast(g) {
 
 // ---------- лист ввода сдачи ----------
 function roundSheet(g, editIndex = null) {
+  if (editIndex != null ? g.rounds[editIndex].total != null : g.simple) return roundSheetSimple(g, editIndex);
   const n = g.sides.length;
   const full = isTeams(g);
   const src = editIndex != null ? g.rounds[editIndex] : null;
@@ -329,6 +335,76 @@ function roundSheet(g, editIndex = null) {
   return sheetApi;
 }
 
+// ---------- простой ввод: выбираем «игру» (162/182/202…) и пишем очки ----------
+const TOTALS = [162, 182, 202, 212, 222, 232, 252];
+function roundSheetSimple(g, editIndex = null) {
+  const n = g.sides.length;
+  const src = editIndex != null ? g.rounds[editIndex] : null;
+  const lastTotal = [...g.rounds].reverse().find((r) => r.total)?.total ?? 162;
+  const st = {
+    loader: src ? src.loader : null, total: src?.total ?? lastTotal,
+    cards: src ? src.cards.map(String) : Array(n).fill(''), manual: src ? [...Array(n - 1).keys()] : [],
+    active: 0, fresh: true, totalStr: '',
+  };
+  const refill = () => {
+    const autos = [...Array(n).keys()].filter((i) => !st.manual.includes(i));
+    if (autos.length !== 1) return;
+    const vals = st.manual.map((i) => st.cards[i]);
+    st.cards[autos[0]] = vals.some((v) => v === '') ? '' : String(Math.max(0, st.total - vals.reduce((a, v) => a + Number(v), 0)));
+  };
+  const touch = (i) => { st.manual = st.manual.filter((x) => x !== i); st.manual.push(i); while (st.manual.length > n - 1) st.manual.shift(); };
+  const toRound = () => ({ ...newRound(n, st.loader), cards: st.cards.map((c) => Number(c) || 0), total: st.total });
+  return sheet((s) => {
+    const preview = () => {
+      if (st.loader == null) return h('div', { class: 'preview' }, h('div', { class: 'msg muted' }, 'Отметьте, кто заказал игру'));
+      const base = g.rounds.slice(0, editIndex ?? g.rounds.length);
+      const res = computeGame({ ...g, rounds: [...base, toRound()] });
+      const row = res.rows[res.rows.length - 1];
+      const msg = row.kind === 'bait' ? ['bait', `Байт: ${g.sides[st.loader].name}`] : row.kind === 'hang' ? ['hang', 'Поровну — висячий байт'] : ['ok', 'Заказ выполнен'];
+      const sum = toRound().cards.reduce((a, b) => a + b, 0);
+      return h('div', { class: 'preview' },
+        h('div', { class: 'nums n' + n }, g.sides.map((x, i) => h('div', { class: 'c' + i }, h('b', null, sign(row.delta[i])), h('span', { class: 'muted small' }, ' = ' + fmt(row.totals[i]))))),
+        h('div', { class: 'msg ' + msg[0] }, msg[1] + (row.notes.length ? ' · ' + row.notes.join(' · ') : '') + (res.finished ? ' · 🏆 партия окончена' : '') + (sum !== st.total ? ` · сумма ${sum} из ${st.total}` : '')));
+    };
+    const key = (k) => {
+      if (st.active === -1) { // своя «игра»
+        st.totalStr = k === '⌫' ? st.totalStr.slice(0, -1) : (st.fresh ? '' : st.totalStr) + k;
+        st.fresh = false; st.totalStr = st.totalStr.slice(0, 3);
+        st.total = Number(st.totalStr) || 0; refill(); return s.render();
+      }
+      const a = st.active;
+      let v = st.fresh ? '' : st.cards[a];
+      if (k === '⌫') v = st.fresh ? '' : v.slice(0, -1); else if (v.length < 3) v += k;
+      st.fresh = false;
+      st.cards[a] = v === '' ? '' : String(Math.min(999, Number(v)));
+      touch(a); refill(); s.render();
+    };
+    const pick = (i) => { st.active = i; st.fresh = true; s.render(); };
+    const custom = !TOTALS.includes(st.total) || st.active === -1;
+    return [
+      h('div', { class: 'sbody' },
+        h('label', { class: 'lbl' }, `Сдача ${editIndex != null ? editIndex + 1 : g.rounds.length + 1} · кто заказал игру?`),
+        h('div', { class: 'who' }, g.sides.map((x, i) => h('button', { class: `c${i}` + (st.loader === i ? ' on' : ''), onclick: () => { st.loader = i; s.render(); } }, x.name))),
+        h('label', { class: 'lbl', style: 'margin-top:8px' }, 'Игра на (очки сдачи вместе с комбинациями)'),
+        h('div', { class: 'chips tot' }, TOTALS.map((t) => h('button', { class: 'chip' + (st.total === t && st.active !== -1 ? ' on' : ''), onclick: () => { st.total = t; if (st.active === -1) st.active = 0; st.fresh = true; refill(); s.render(); } }, t)),
+          h('button', { class: 'chip' + (custom ? ' on' : ''), onclick: () => { st.active = -1; st.fresh = true; st.totalStr = ''; s.render(); } }, custom ? `Своя: ${st.total}` : 'Своя')),
+        h('div', { class: 'rgrid n' + n, style: 'margin-top:8px' }, g.sides.map((x, i) => h('div', { class: 'col c' + i },
+          h('button', { class: 'pts' + (st.active === i ? ' active' : '') + (st.cards[i] === '' ? ' empty' : ''), onclick: () => pick(i) },
+            h('span', { class: 'who-n' }, x.name), st.cards[i] === '' ? '0' : st.cards[i], !st.manual.includes(i) && st.cards[i] !== '' && h('small', null, 'авто')))))),
+      h('div', { class: 'sfoot' },
+        preview(),
+        h('div', { class: 'keys' }, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0'].map((k) => h('button', { onclick: () => key(k), 'aria-label': k }, k)),
+          h('button', { class: 'next', onclick: () => { st.active = st.active < 0 ? 0 : (st.active + 1) % n; st.fresh = true; s.render(); } }, 'дальше ›')),
+        h('div', { class: 'stack', style: 'margin-top:10px' },
+          h('button', {
+            class: 'btn', disabled: st.loader == null,
+            onclick: () => { const round = toRound(); if (editIndex != null) g.rounds[editIndex] = round; else g.rounds.push(round); S.currentId = g.id; store.save(); s.close(); route(); },
+          }, editIndex != null ? 'Сохранить' : 'Записать'),
+          editIndex != null && h('button', { class: 'btn danger', onclick: async () => { if (await ask('Удалить эту сдачу?', 'Удалить')) { g.rounds.splice(editIndex, 1); store.save(); s.close(); route(); } } }, 'Удалить сдачу'))),
+    ];
+  }, 'split');
+}
+
 // ---------- изменение сторон/настроек ----------
 function editSide(g, i) {
   const side = g.sides[i];
@@ -370,6 +446,8 @@ function settingsSheet(g) {
       h('h3', null, 'Настройки партии'),
       h('div', { class: 'stack' },
         h('div', null, h('label', { class: 'lbl' }, 'Играем до'), h('div', { class: 'seg' }, [301, 501, 1001].map((t) => h('button', { class: g.target === t ? 'on' : '', onclick: () => { g.target = t; store.save(); s.render(); route(); } }, t)))),
+        h('div', null, h('label', { class: 'lbl' }, 'Запись новых сдач'),
+          h('div', { class: 'seg' }, [[false, 'Полная'], [true, 'Простая']].map(([v, t]) => h('button', { class: !!g.simple === v ? 'on' : '', onclick: () => { g.simple = v; if (S.last) S.last.simple = v; store.save(); s.render(); route(); } }, t)))),
         h('div', null, h('label', { class: 'lbl' }, 'Штрафы (−100 за 3-й и следующие байты, −50 без взяток)'),
           h('div', { class: 'seg' }, [[true, 'Включены'], [false, 'Выключены']].map(([v, t]) => h('button', { class: g.settings.penalties === v ? 'on' : '', onclick: () => set('penalties', v) }, t)))),
         g.sides.length === 3 && h('div', null, h('label', { class: 'lbl' }, 'Байт на троих: очки заказавшего получает'),
