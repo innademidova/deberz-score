@@ -188,3 +188,8 @@ nav.tabs button.on { color: var(--accent); }
 
 .chips.tot { gap: 6px; }
 .chips.tot .chip { min-height: 40px; padding: 6px 12px; }
+
+.lrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.lrow .lbl { margin: 0; }
+.seg.mode { padding: 2px; border-radius: 10px; width: 150px; flex: none; }
+.seg.mode button { min-height: 32px; font-size: 13px; border-radius: 8px; }

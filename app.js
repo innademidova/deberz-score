@@ -141,7 +141,7 @@ function rulesSheet() {
         h('li', null, h('b', null, 'Заказавший'), ' должен набрать больше каждого соперника (карты + комбинации).'),
         h('li', null, h('b', null, 'Байт'), ' — набрал меньше: заказавший пишет 0, вистующий записывает все очки сдачи. На троих очки заказавшего получает тот, у кого больше (в настройках можно «поровну»).'),
         h('li', null, h('b', null, 'Равенство'), ' — «висячий байт»: заказавший пишет 0, его очки достаются тому, кто выиграет следующую сдачу.'),
-        h('li', null, h('b', null, 'Простая запись'), ': выбираете «игру» (162, 182, 202, 212… — сумма очков сдачи вместе с комбинациями) и вводите очки; остальные стороны считаются сами.'),
+        h('li', null, h('b', null, 'Режим «Простой»'), ': выбираете «игру» (162, 182, 202, 212… — сумма очков сдачи вместе с комбинациями) и вводите очки; остальные стороны считаются сами.'),
         h('li', null, 'Штрафы: каждый байт начиная с третьего −100; сдача без взяток −50 (можно отключить).'),
         h('li', null, 'Партия до 1001 (или 301/501). Побеждает набравший больше; при равенстве — вистовавший в последней сдаче. «Деберц» — мгновенная победа.'),
         h('li', null, 'Вчетвером (2×2) играются все 32 карты, поэтому очки второй команды считаются сами: 162 минус очки первой.'))),
@@ -191,8 +191,8 @@ function newGame() {
     h('div', null, h('label', { class: 'lbl' }, 'Играем до'),
       h('div', { class: 'seg' }, [301, 501, 1001].map((t) => h('button', { class: setup.target === t ? 'on' : '', onclick: () => { setup.target = t; draw(); } }, t)))),
     h('div', null, h('label', { class: 'lbl' }, 'Как записывать сдачи'),
-      h('div', { class: 'seg' }, [[false, 'Полная'], [true, 'Простая']].map(([v, t]) => h('button', { class: !!setup.simple === v ? 'on' : '', onclick: () => { setup.simple = v; draw(); } }, t))),
-      h('div', { class: 'muted small', style: 'margin:6px 2px 0' }, setup.simple ? 'Без терцев, бел и последа: выбираете игру (162, 182, 202…) и вводите очки.' : 'Отдельно очки за карты, послед, терцы, берцы и белу.')),
+      h('div', { class: 'seg' }, [[false, 'Про'], [true, 'Простой']].map(([v, t]) => h('button', { class: !!setup.simple === v ? 'on' : '', onclick: () => { setup.simple = v; draw(); } }, t))),
+      h('div', { class: 'muted small', style: 'margin:6px 2px 0' }, setup.simple ? 'Простой: без терцев, бел и последа — выбираете игру (162, 182, 202…) и вводите очки. Режим можно менять прямо при записи сдачи.' : 'Про: отдельно очки за карты, послед, терцы, берцы и белу. Режим можно менять прямо при записи сдачи.')),
     h('button', { class: 'btn', onclick: () => { const s = setup; setup = null; startGame(s); } }, 'Начать игру'));
 }
 function history_back() { setup = null; location.hash = '#/'; }
@@ -264,11 +264,27 @@ async function undoLast(g) {
 }
 
 // ---------- лист ввода сдачи ----------
-function roundSheet(g, editIndex = null) {
-  if (editIndex != null ? g.rounds[editIndex].total != null : g.simple) return roundSheetSimple(g, editIndex);
+function modeSwitch(g, current, getDraft, editIndex) {
+  const go = (target) => {
+    if (target === current) return;
+    const d = getDraft();
+    const n = g.sides.length;
+    const seed = target === 'simple'
+      ? (() => { const cards = Array.from({ length: n }, (_, i) => roundPoints(d, i)); return { ...d, cards, last: null, combos: d.combos.map(() => ({ terc: 0, berc: 0, bela: false })), noTricks: Array(n).fill(false), total: cards.reduce((a, b) => a + b, 0) }; })()
+      : { ...d, total: undefined };
+    document.querySelectorAll('#layer .back').forEach((b) => b.remove());
+    g.simple = target === 'simple'; if (S.last) S.last.simple = g.simple; store.save();
+    roundSheet(g, editIndex, target, seed);
+  };
+  return h('div', { class: 'seg mode' }, [['simple', 'Простой'], ['pro', 'Про']].map(([m, t]) => h('button', { class: current === m ? 'on' : '', onclick: () => go(m) }, t)));
+}
+
+function roundSheet(g, editIndex = null, force = null, seed = null) {
+  const mode = force || (editIndex != null ? (g.rounds[editIndex].total != null ? 'simple' : 'pro') : g.simple ? 'simple' : 'pro');
+  if (mode === 'simple') return roundSheetSimple(g, editIndex, seed);
   const n = g.sides.length;
   const full = isTeams(g);
-  const src = editIndex != null ? g.rounds[editIndex] : null;
+  const src = seed || (editIndex != null ? g.rounds[editIndex] : null);
   const prevLoader = g.rounds.filter((r) => r.type === 'round').at(-1)?.loader ?? null;
   const st = src
     ? { loader: src.loader, cards: src.cards.map(String), last: src.last, combos: src.combos.map((c) => ({ ...c })), noTricks: [...src.noTricks], active: 0, primary: 0 }
@@ -304,7 +320,7 @@ function roundSheet(g, editIndex = null) {
     };
     return [
       h('div', { class: 'sbody' },
-      h('label', { class: 'lbl' }, `Сдача ${editIndex != null ? editIndex + 1 : g.rounds.length + 1} · кто заказал игру?`),
+      h('div', { class: 'lrow' }, h('label', { class: 'lbl' }, `Сдача ${editIndex != null ? editIndex + 1 : g.rounds.length + 1} · кто заказал?`), modeSwitch(g, 'pro', toRound, editIndex)),
       h('div', { class: 'who' }, g.sides.map((x, i) => h('button', { class: `c${i}` + (st.loader === i ? ' on' : ''), onclick: () => { st.loader = i; s.render(); } }, x.name))),
       h('div', { class: 'rgrid n' + n }, g.sides.map((x, i) => h('div', { class: 'col c' + i },
         h('button', { class: 'pts' + (st.active === i ? ' active' : '') + (st.cards[i] === '' ? ' empty' : ''), onclick: () => { st.active = i; if (full) st.primary = i; s.render(); } },
@@ -337,9 +353,9 @@ function roundSheet(g, editIndex = null) {
 
 // ---------- простой ввод: выбираем «игру» (162/182/202…) и пишем очки ----------
 const TOTALS = [162, 182, 202, 212, 222, 232, 252];
-function roundSheetSimple(g, editIndex = null) {
+function roundSheetSimple(g, editIndex = null, seed = null) {
   const n = g.sides.length;
-  const src = editIndex != null ? g.rounds[editIndex] : null;
+  const src = seed || (editIndex != null ? g.rounds[editIndex] : null);
   const lastTotal = [...g.rounds].reverse().find((r) => r.total)?.total ?? 162;
   const st = {
     loader: src ? src.loader : null, total: src?.total ?? lastTotal,
@@ -383,9 +399,9 @@ function roundSheetSimple(g, editIndex = null) {
     const custom = !TOTALS.includes(st.total) || st.active === -1;
     return [
       h('div', { class: 'sbody' },
-        h('label', { class: 'lbl' }, `Сдача ${editIndex != null ? editIndex + 1 : g.rounds.length + 1} · кто заказал игру?`),
+        h('div', { class: 'lrow' }, h('label', { class: 'lbl' }, `Сдача ${editIndex != null ? editIndex + 1 : g.rounds.length + 1} · кто заказал?`), modeSwitch(g, 'simple', toRound, editIndex)),
         h('div', { class: 'who' }, g.sides.map((x, i) => h('button', { class: `c${i}` + (st.loader === i ? ' on' : ''), onclick: () => { st.loader = i; s.render(); } }, x.name))),
-        h('label', { class: 'lbl', style: 'margin-top:8px' }, 'Игра на (очки сдачи вместе с комбинациями)'),
+        h('label', { class: 'lbl', style: 'margin-top:8px' }, 'Игра на (сумма очков сдачи)'),
         h('div', { class: 'chips tot' }, TOTALS.map((t) => h('button', { class: 'chip' + (st.total === t && st.active !== -1 ? ' on' : ''), onclick: () => { st.total = t; if (st.active === -1) st.active = 0; st.fresh = true; refill(); s.render(); } }, t)),
           h('button', { class: 'chip' + (custom ? ' on' : ''), onclick: () => { st.active = -1; st.fresh = true; st.totalStr = ''; s.render(); } }, custom ? `Своя: ${st.total}` : 'Своя')),
         h('div', { class: 'rgrid n' + n, style: 'margin-top:8px' }, g.sides.map((x, i) => h('div', { class: 'col c' + i },
@@ -447,7 +463,7 @@ function settingsSheet(g) {
       h('div', { class: 'stack' },
         h('div', null, h('label', { class: 'lbl' }, 'Играем до'), h('div', { class: 'seg' }, [301, 501, 1001].map((t) => h('button', { class: g.target === t ? 'on' : '', onclick: () => { g.target = t; store.save(); s.render(); route(); } }, t)))),
         h('div', null, h('label', { class: 'lbl' }, 'Запись новых сдач'),
-          h('div', { class: 'seg' }, [[false, 'Полная'], [true, 'Простая']].map(([v, t]) => h('button', { class: !!g.simple === v ? 'on' : '', onclick: () => { g.simple = v; if (S.last) S.last.simple = v; store.save(); s.render(); route(); } }, t)))),
+          h('div', { class: 'seg' }, [[false, 'Про'], [true, 'Простой']].map(([v, t]) => h('button', { class: !!g.simple === v ? 'on' : '', onclick: () => { g.simple = v; if (S.last) S.last.simple = v; store.save(); s.render(); route(); } }, t)))),
         h('div', null, h('label', { class: 'lbl' }, 'Штрафы (−100 за 3-й и следующие байты, −50 без взяток)'),
           h('div', { class: 'seg' }, [[true, 'Включены'], [false, 'Выключены']].map(([v, t]) => h('button', { class: g.settings.penalties === v ? 'on' : '', onclick: () => set('penalties', v) }, t)))),
         g.sides.length === 3 && h('div', null, h('label', { class: 'lbl' }, 'Байт на троих: очки заказавшего получает'),
