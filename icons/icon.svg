@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#14513b"/>
+  <g transform="translate(256 256)">
+    <rect x="-118" y="-150" width="236" height="300" rx="26" fill="#fbf8ef"/>
+    <text x="0" y="40" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="220" fill="#14513b">Д</text>
+    <text x="-92" y="-108" font-family="Arial, sans-serif" font-size="46" fill="#c43d2f">♥</text>
+    <text x="92" y="132" text-anchor="end" font-family="Arial, sans-serif" font-size="46" fill="#c43d2f">♥</text>
+  </g>
+</svg>
