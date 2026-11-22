@@ -1,7 +1,7 @@
 // Офлайн: кладём весь сайт в кеш при установке, дальше отдаём из кеша.
-const VERSION = 'deberz-v6';
+const VERSION = 'deberz-v7';
 const FILES = [
-  './', './index.html', './style.css', './app.js', './scoring.js', './store.js',
+  './', './index.html', './style.css', './app.js', './scoring.js', './store.js', './names.js',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
 ];

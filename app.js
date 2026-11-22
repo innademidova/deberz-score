@@ -1,5 +1,6 @@
 import { computeGame, newRound, roundPoints, comboPoints, FULL_DECK_TOTAL, LAST_TRICK, DEFAULT_SETTINGS } from './scoring.js';
 import * as store from './store.js';
+import { randomTeamName } from './names.js';
 
 const S = store.state();
 const $ = (s) => document.querySelector(s);
@@ -25,10 +26,56 @@ function h(tag, attrs, ...kids) {
 const sign = (n) => (n > 0 ? '+' + n : n < 0 ? '−' + Math.abs(n) : '0');
 const fmt = (n) => (n < 0 ? '−' + Math.abs(n) : String(n));
 let toastTimer;
-function toast(msg) {
+function toast(msg, undo = null) {
   const t = $('#toast');
-  t.textContent = msg; t.classList.add('on');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2600);
+  t.replaceChildren(h('span', null, msg));
+  if (undo) t.append(h('button', { class: 'undo', onclick: () => { t.classList.remove('on', 'act'); clearTimeout(toastTimer); undo(); } }, 'Вернуть'));
+  t.classList.add('on'); t.classList.toggle('act', !!undo);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on', 'act'), undo ? 5000 : 2600);
+}
+
+// Свайп влево по строке — удалить (с кнопкой «Вернуть» во всплывашке).
+function swipeRow(content, onDelete) {
+  const row = h('div', { class: 'swipe' }, h('div', { class: 'bin' }, '🗑 Удалить'), content);
+  let x0 = 0, y0 = 0, dx = 0, drag = false, decided = false, id = null;
+  const set = (v, anim) => { content.style.transition = anim ? 'transform .2s' : 'none'; content.style.transform = v ? `translateX(${v}px)` : ''; row.classList.toggle('open', v < -8); };
+  content.addEventListener('pointerdown', (e) => { x0 = e.clientX; y0 = e.clientY; dx = 0; drag = false; decided = false; id = e.pointerId; });
+  content.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== id) return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!decided && (Math.abs(mx) > 8 || Math.abs(my) > 8)) { decided = true; drag = Math.abs(mx) > Math.abs(my) && mx < 0; if (drag) content.setPointerCapture(id); }
+    if (drag) { dx = Math.min(0, mx); set(dx); }
+  });
+  const end = () => {
+    if (!drag) { id = null; return; }
+    const w = content.offsetWidth;
+    if (dx < -w * 0.35) { content.style.transition = 'transform .2s'; content.style.transform = `translateX(${-w - 20}px)`; setTimeout(onDelete, 180); }
+    else set(0, true);
+    id = null;
+  };
+  content.addEventListener('pointerup', end);
+  content.addEventListener('pointercancel', () => { drag = false; set(0, true); id = null; });
+  content.addEventListener('click', (e) => { if (drag || dx < -8) { e.stopImmediatePropagation(); e.preventDefault(); drag = false; dx = 0; } }, true);
+  return row;
+}
+
+function deleteGame(g) {
+  const idx = S.games.indexOf(g);
+  if (idx < 0) return;
+  const wasCurrent = S.currentId === g.id;
+  S.games.splice(idx, 1);
+  if (wasCurrent) S.currentId = null;
+  store.save(); route();
+  toast('Партия удалена', () => { S.games.splice(idx, 0, g); if (wasCurrent) S.currentId = g.id; store.save(); route(); });
+}
+function deleteTeam(t) {
+  const idx = S.teams.indexOf(t);
+  if (idx < 0) return;
+  const refs = [];
+  S.games.forEach((g) => g.sides.forEach((x) => { if (x.teamId === t.id) { refs.push(x); delete x.teamId; } }));
+  S.teams.splice(idx, 1);
+  store.save(); route();
+  toast(`«${t.name}» удалена`, () => { S.teams.splice(idx, 0, t); refs.forEach((x) => { x.teamId = t.id; }); store.save(); route(); });
 }
 store.setToast(toast);
 
@@ -59,6 +106,15 @@ const gameById = (id) => S.games.find((g) => g.id === id);
 const currentGame = () => { const g = gameById(S.currentId); return g && !computeGame(g).finished ? g : null; };
 const isTeams = (g) => g.mode === 't2';
 const defName = (mode, i) => (mode === 't2' ? 'Команда ' + (i + 1) : 'Игрок ' + (i + 1));
+// Имя команды, если его не ввели: иногда «Инна + Лёша» (если игроки вписаны), иначе случайное харьковское.
+function autoName(s, taken) {
+  const mem = (s.members || []).map((m) => (m || '').trim()).filter(Boolean);
+  const key = (arr) => arr.map((m) => m.toLowerCase()).sort().join('|');
+  const known = mem.length === 2 && S.teams.find((t) => (t.members || []).length === 2 && key(t.members) === key(mem));
+  if (known) return known.name; // эта пара уже играла — берём её прежнее название, история не разбивается
+  if (!s.auto) s.auto = { pick: randomTeamName(taken), byMembers: Math.random() < 0.5 };
+  return mem.length === 2 && s.auto.byMembers ? mem.join(' + ') : s.auto.pick;
+}
 const sidesCount = (mode) => (mode === 'p3' ? 3 : 2);
 const modeLabel = { p2: '2 игрока', p3: '3 игрока', t2: '2 × 2 команды' };
 const find = (name) => S.teams.find((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase());
@@ -69,16 +125,20 @@ function rememberSide(side, typed) {
   if (!name || !typed) return side;
   let t = find(name);
   const members = (side.members || []).map((m) => m.trim()).filter(Boolean);
-  if (!t) { t = { id: store.uid(), name, members }; S.teams.push(t); }
-  else if (members.length) t.members = members;
+  // копии массивов: иначе правка имён в новой игре меняла бы игроков сохранённой команды и старых партий
+  if (!t) { t = { id: store.uid(), name, members: [...members] }; S.teams.push(t); }
+  else if (members.length) t.members = [...members];
   return { ...side, name, members, teamId: t.id };
 }
 
 function startGame(setup) {
   const sides = setup.sides.map((s, i) => {
     const typed = !!s.name.trim();
-    const side = { name: s.name.trim() || defName(setup.mode, i), members: s.members || [], teamId: s.teamId };
-    return rememberSide(side, typed);
+    const members = (s.members || []).map((m) => (m || '').trim()).filter(Boolean);
+    const blank = setup.mode === 't2' ? autoName(s, setup.sides.map((x) => x.name)) : defName(setup.mode, i);
+    const side = { name: s.name.trim() || blank, members, teamId: typed ? s.teamId : undefined };
+    // безымянную команду запоминаем, только если вписаны игроки — иначе список забьётся случайными названиями
+    return rememberSide(side, typed || (setup.mode === 't2' && members.length > 0));
   });
   const g = {
     id: store.uid(), created: Date.now(), mode: setup.mode, target: setup.target, simple: !!setup.simple, sides, rounds: [],
@@ -155,7 +215,7 @@ let setup = null;
 function newGame() {
   if (!setup) {
     const l = S.last;
-    setup = l ? { mode: l.mode, target: l.target, simple: !!l.simple, sides: l.sides.map((s) => ({ ...s })) } : { mode: 'p2', target: 1001, simple: false, sides: [{ name: '', members: [] }, { name: '', members: [] }] };
+    setup = l ? { mode: l.mode, target: l.target, simple: !!l.simple, sides: l.sides.map((s) => ({ ...s, members: [...(s.members || [])], auto: null })) } : { mode: 'p2', target: 1001, simple: false, sides: [{ name: '', members: [] }, { name: '', members: [] }] };
   }
   const draw = () => app.replaceChildren(newGame());
   const setMode = (m) => {
@@ -171,14 +231,26 @@ function newGame() {
     const free = S.teams.filter((t) => !usedIds().includes(t.id) || t.id === s.teamId);
     return h('div', { class: 'card stack c' + i },
       h('div', { class: 'row' }, h('span', { class: 'dot' }), h('b', null, defName(setup.mode, i))),
-      h('input', {
-        class: 'text', placeholder: defName(setup.mode, i), value: s.name, maxlength: 24, autocomplete: 'off',
-        oninput: (e) => { s.name = e.target.value; s.teamId = find(s.name)?.id; },
-      }),
+      setup.mode === 't2'
+        ? h('div', { class: 'row namerow' },
+          h('input', {
+            class: 'text grow', placeholder: autoName(s, setup.sides.map((x) => x.name)), value: s.name, maxlength: 24, autocomplete: 'off', 'aria-label': 'Название команды',
+            oninput: (e) => { s.name = e.target.value; s.teamId = find(s.name)?.id; },
+          }),
+          h('button', { class: 'iconbtn dice', 'aria-label': 'Случайное название', onclick: () => { s.name = randomTeamName(setup.sides.map((x) => x.name)); s.teamId = find(s.name)?.id; draw(); } }, '🎲'))
+        : h('input', {
+          class: 'text', placeholder: defName(setup.mode, i), value: s.name, maxlength: 24, autocomplete: 'off',
+          oninput: (e) => { s.name = e.target.value; s.teamId = find(s.name)?.id; },
+        }),
       setup.mode === 't2' && h('div', { class: 'row' }, [0, 1].map((k) => h('input', {
         class: 'text', placeholder: 'Игрок ' + (k + 1), value: s.members[k] || '', maxlength: 20,
-        oninput: (e) => { s.members[k] = e.target.value; },
+        oninput: (e) => {
+          s.members[k] = e.target.value;
+          const inp = e.target.closest('.card').querySelector('.namerow input');
+          if (inp) inp.placeholder = autoName(s, setup.sides.map((x) => x.name));
+        },
       }))),
+      setup.mode === 't2' && !s.name.trim() && h('div', { class: 'muted small' }, 'Без названия возьмём то, что серым в поле (или «Имя + Имя» игроков). 🎲 — другое.'),
       free.length > 0 && h('div', { class: 'chips' }, free.map((t) => h('button', {
         class: 'chip' + (s.teamId === t.id ? ' on' : ''),
         onclick: () => { s.name = t.name; s.members = [...(t.members || [])]; s.teamId = t.id; draw(); },
@@ -515,7 +587,7 @@ function gameCard(g) {
 function history() {
   const games = [...S.games].sort((a, b) => b.created - a.created).filter((g) => g.rounds.length || g.id === S.currentId);
   return h('div', null, h('h1', null, 'История'), h('div', { style: 'margin-top:12px' },
-    games.length ? games.map(gameCard) : h('div', { class: 'empty' }, h('b', null, 'Пока пусто'), 'Сыгранные партии появятся здесь.')), tabs('history'));
+    games.length ? [h('div', { class: 'muted small', style: 'margin:-4px 2px 8px' }, 'Смахните партию влево, чтобы удалить.'), ...games.map((g) => swipeRow(gameCard(g), () => deleteGame(g)))] : h('div', { class: 'empty' }, h('b', null, 'Пока пусто'), 'Сыгранные партии появятся здесь.')), tabs('history'));
 }
 
 // ---------- команды и игроки ----------
@@ -527,14 +599,14 @@ function teamStats(t) {
 }
 function teams() {
   const wrap = h('div', null, h('div', { class: 'row between' }, h('h1', null, 'Команды и игроки'), h('button', { class: 'btn sm', onclick: () => teamEdit(null) }, '＋')));
-  wrap.append(h('div', { class: 'muted small', style: 'margin-bottom:10px' }, 'Сохраняются автоматически, когда вы начинаете игру. Нажмите, чтобы посмотреть историю.'));
+  wrap.append(h('div', { class: 'muted small', style: 'margin-bottom:10px' }, 'Сохраняются автоматически, когда вы начинаете игру. Нажмите — история, смахните влево — удалить.'));
   const list = h('div', { class: 'list' });
   if (!S.teams.length) list.append(h('div', { class: 'empty' }, h('b', null, 'Список пуст'), 'Добавьте команду кнопкой «＋» или просто начните игру.'));
   S.teams.forEach((t) => {
     const st = teamStats(t);
-    list.append(h('button', { onclick: () => (location.hash = '#/team/' + t.id) },
+    list.append(swipeRow(h('button', { onclick: () => (location.hash = '#/team/' + t.id) },
       h('div', { class: 'grow' }, h('b', null, t.name), t.members?.length > 0 && h('div', { class: 'muted small' }, t.members.join(' · '))),
-      h('div', { class: 'stat' }, h('span', null, `${st.played} игр`), h('span', null, `${st.wins} побед`))));
+      h('div', { class: 'stat' }, h('span', null, `${st.played} игр`), h('span', null, `${st.wins} побед`))), () => deleteTeam(t)));
   });
   wrap.append(list);
   wrap.append(h('div', { class: 'row', style: 'margin-top:10px;gap:8px' },
@@ -581,7 +653,7 @@ function teamView(id) {
     t.members?.length > 0 && h('div', { class: 'muted' }, t.members.join(' · ')),
     h('div', { class: 'card row between' }, h('div', null, h('b', null, st.played), h('div', { class: 'muted small' }, 'партий')), h('div', null, h('b', null, st.wins), h('div', { class: 'muted small' }, 'побед')), h('div', null, h('b', null, st.played ? Math.round((st.wins / st.played) * 100) + '%' : '—'), h('div', { class: 'muted small' }, 'выигрыш'))),
     h('h2', null, 'Партии'),
-    h('div', null, st.gs.length ? [...st.gs].sort((a, b) => b.created - a.created).map(gameCard) : h('div', { class: 'empty' }, 'Пока нет партий')),
+    h('div', null, st.gs.length ? [...st.gs].sort((a, b) => b.created - a.created).map((g) => swipeRow(gameCard(g), () => deleteGame(g))) : h('div', { class: 'empty' }, 'Пока нет партий')),
     tabs('teams'));
 }
 

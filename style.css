@@ -207,3 +207,18 @@ nav.tabs button.on { color: var(--accent); }
 .lrow .lbl { margin: 0; }
 .seg.mode { padding: 2px; border-radius: 10px; width: 150px; flex: none; }
 .seg.mode button { min-height: 32px; font-size: 13px; border-radius: 8px; }
+
+/* свайп для удаления */
+.swipe { position: relative; margin-bottom: 8px; border-radius: 16px; overflow: hidden; }
+.swipe > .bin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 18px; background: #d93a3a; color: #fff; font-weight: 700; border-radius: 16px; opacity: 0; transition: opacity .15s; }
+.swipe.open > .bin { opacity: 1; }
+.swipe > button, .swipe > .hg { position: relative; margin-bottom: 0 !important; touch-action: pan-y; }
+.list > .swipe > button { width: 100%; text-align: left; display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 60px; background: var(--card); border-radius: 16px; box-shadow: var(--shadow); }
+#toast.act { pointer-events: auto; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; }
+#toast .undo { background: #fff; color: #222; border-radius: 16px; padding: 6px 12px; font-weight: 700; }
+.namerow { gap: 8px; }
+.namerow .grow { flex: 1; min-width: 0; }
+.dice { font-size: 22px; flex: none; }
+#toast.act { width: max-content; max-width: 92vw; text-align: left; }
+#toast.act span { flex: 1; }
+#toast .undo { flex: none; }
